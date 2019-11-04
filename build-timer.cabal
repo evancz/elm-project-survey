@@ -19,6 +19,9 @@ Executable build-timer
     Hs-Source-Dirs: src
     Main-Is: Main.hs
 
+    other-modules:
+        Details
+
     Build-depends:
         aeson,
         base >=4.11 && <5,
