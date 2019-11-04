@@ -10,14 +10,15 @@ import qualified Data.Binary as Binary
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Char as Char
+import qualified Data.List as List
 import qualified Data.Time.Clock as Time
 import qualified Data.Time.Clock.System as Time
 import Data.Word (Word16)
+import qualified Details
 import qualified Control.Monad as M
 import qualified System.Directory as Dir
 import qualified System.Environment as Env
 import qualified System.Exit as Exit
-import System.FilePath ((</>))
 import qualified System.Information as Info
 import qualified System.IO as IO
 import qualified System.Process as Process
@@ -41,21 +42,28 @@ main =
       ram <- getRam
       cpus <- Info.cpus
 
+      warmup elm root
       normal <- measure elm root []
-      devnull <- measure elm root ["--output=NUL"]
-      optimize <- measure elm root ["--optimize"]
+      devnull <- measure elm root ["--output=/dev/null"]
 
-      let result = Results (show os) ram (Info.showCPUs cpus) normal devnull optimize
+      let result = Results (show os) ram (Info.showCPUs cpus) normal devnull
       Binary.encodeFile "results.dat" result
-      render result
+      render root result
+
+
+warmup :: Command -> FilePath -> IO ()
+warmup elm root =
+  do  removeElmStuff
+      _ <- _run elm ["make", root, "--output=/dev/null"]
+      return ()
 
 
 measure :: Command -> FilePath -> [String] -> IO FlagResult
 measure elm root flags =
   do  removeElmStuff
       scratch <- _run elm ("make" : root : flags)
-      files <- getFiles
-      incrementals <- traverse (measureFile elm root flags) files
+      paths <- Details.getLocalPaths
+      incrementals <- traverse (measureFile elm root flags) paths
       return $ FlagResult scratch incrementals
 
 
@@ -94,7 +102,6 @@ data Results =
     , _cpus :: String
     , _normal :: FlagResult
     , _devnull :: FlagResult
-    , _optimize :: FlagResult
     }
 
 
@@ -114,8 +121,8 @@ data FileResult =
 
 
 instance Binary.Binary Results where
-  get = Results <$> get <*> get <*> get <*> get <*> get <*> get
-  put (Results a b c d e f) = put a >> put b >> put c >> put d >> put e >> put f
+  get = M.liftM5 Results get get get get get
+  put (Results a b c d e) = put a >> put b >> put c >> put d >> put e
 
 
 instance Binary.Binary FlagResult where
@@ -252,29 +259,58 @@ getRam =
 
 
 
--- GET FILES
-
-
-getFiles :: IO [FilePath]
-getFiles =
-  do  details <- Binary.decodeFile ("elm-stuff" </> "0.19.1" </> "d.dat")
-      return (error "TODO" (details :: ()))
-
-
-
 -- RENDER
 
 
-render :: Results -> IO ()
-render (Results os ram cpus _normal _devnull _optimize) =
-  do  putStr "\ESC[2J"
-      putStrLn "-- OVERVIEW -----------------------------------------------\n"
+render :: FilePath -> Results -> IO ()
+render root (Results os ram cpus normal devnull@(FlagResult _ fs)) =
+  do  putStrLn "\n-- OVERVIEW -----------------------------------------------\n"
       putStrLn $ "OS:  " ++ os
+      putStrLn $ "RAM: " ++ show ram ++ "GB"
       putStrLn $ "CPU: " ++ cpus
-      putStrLn $ "RAM: " ++ show ram ++ "GB\n"
-      putStrLn "This data (and more) is saved in the results.dat file.\n"
-      putStrLn "-----------------------------------------------------------\n"
-      putStrLn "Send the results.dat file TODO"
+
+      putStrLn $ "PROJECT: " ++ show (length fs) ++ " files, " ++ show (sum (map _lines fs)) ++ " lines\n"
+
+      renderResults normal ["elm",root]
+      renderResults devnull ["elm",root,"--output=/dev/null"]
+
+      putStrLn "-----------------------------------------------------------"
+      putStrLn "Does everything look alright with these numbers?"
+      putStrLn "If so, please share results.dat in the Discourse thread.\n"
+
+
+renderResults :: FlagResult -> [String] -> IO ()
+renderResults (FlagResult scratch incrementals) parts =
+  let
+    times = List.sort (map (_milliseconds . _time) incrementals)
+    fresh = show (_milliseconds scratch)
+    minIn = show (head times)
+    medIn = show (median times)
+    maxIn = show (last times)
+    n     = maximum (map length [fresh, minIn, medIn, maxIn])
+  in
+  do  putStrLn $ "COMMAND: " ++ unwords parts ++ "\n"
+      putStrLn $ pad n fresh ++ "ms  -- from scratch"
+      putStrLn $ pad n maxIn ++ "ms  -- worst incremental"
+      putStrLn $ pad n medIn ++ "ms  -- median incremental"
+      putStrLn $ pad n minIn ++ "ms  -- best incremental\n"
+
+
+pad :: Int -> String -> String
+pad width str =
+  replicate (2 + width - length str) ' ' ++ str
+
+
+median :: [Integer] -> Integer
+median times =
+  let
+    len = length times
+    mid = div len 2
+    idx = (List.!!)
+  in
+  if mod len 2 == 1
+    then idx times mid
+    else div (idx times mid + idx times (mid + 1)) 2
 
 
 
