@@ -11,6 +11,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Char as Char
 import qualified Data.List as List
+import qualified Data.Map as Map
 import qualified Data.Time.Clock as Time
 import qualified Data.Time.Clock.System as Time
 import Data.Word (Word16)
@@ -34,7 +35,7 @@ import Text.RawString.QQ (r)
 
 main :: IO ()
 main =
-  do  verifyElmJson
+  do  deps <- verifyElmJson
       elm <- getElm
       root <- getRoot
 
@@ -55,7 +56,7 @@ main =
       devnull <- measure elm root ["--output=/dev/null"]
       sizes <- getSizes elm root npm node
 
-      let result = Results (show os) ram (Info.showCPUs cpus) normal devnull sizes
+      let result = Results (show os) ram (Info.showCPUs cpus) deps normal devnull sizes
       Binary.encodeFile "results.dat" result
       render root result
 
@@ -109,9 +110,17 @@ data Results =
     { _os :: String
     , _ram :: Word16
     , _cpus :: String
+    , _deps :: Deps
     , _normal :: FlagResult
     , _devnull :: FlagResult
     , _sizes :: Sizes
+    }
+
+
+data Deps =
+  Deps
+    { _direct :: Map.Map String String
+    , _indirect :: Map.Map String String
     }
 
 
@@ -139,8 +148,13 @@ data Sizes =
 
 
 instance Binary.Binary Results where
-  get = Results <$> get <*> get <*> get <*> get <*> get <*> get
-  put (Results a b c d e f) = put a >> put b >> put c >> put d >> put e >> put f
+  get = Results <$> get <*> get <*> get <*> get <*> get <*> get <*> get
+  put (Results a b c d e f g) = put a >> put b >> put c >> put d >> put e >> put f >> put g
+
+
+instance Binary.Binary Deps where
+  get = M.liftM2 Deps get get
+  put (Deps a b) = put a >> put b
 
 
 instance Binary.Binary FlagResult where
@@ -184,7 +198,7 @@ instance Binary.Binary Time where
 -- VERIFY ELM JSON
 
 
-verifyElmJson :: IO ()
+verifyElmJson :: IO Deps
 verifyElmJson =
   do  exists <- Dir.doesFileExist "elm.json"
 
@@ -198,19 +212,30 @@ verifyElmJson =
         Nothing ->
           failure "No \"elm-version\" field in your elm.json file."
 
-        Just (Version vsn) ->
+        Just (Outline vsn deps) ->
           if vsn == "0.19.1"
-            then return ()
+            then return deps
             else failure $ "This project uses Elm " ++ vsn ++ ", but I want to benchmark 0.19.1\nProject must be upgraded before I can run!"
 
 
-newtype Version =
-  Version String
+data Outline =
+  Outline String Deps
 
 
-instance Json.FromJSON Version where
-  parseJSON = Json.withObject "outline" $
-    \obj -> Version <$> obj .: "elm-version"
+instance Json.FromJSON Outline where
+  parseJSON =
+    Json.withObject "outline" $ \obj ->
+      Outline
+        <$> obj .: "elm-version"
+        <*> obj .: "dependencies"
+
+
+instance Json.FromJSON Deps where
+  parseJSON =
+    Json.withObject "dependencies" $ \obj ->
+      Deps
+        <$> obj .: "direct"
+        <*> obj .: "indirect"
 
 
 
@@ -334,13 +359,17 @@ withinTempDir dir work =
 
 
 render :: FilePath -> Results -> IO ()
-render root (Results os ram cpus normal devnull@(FlagResult _ fs) (Sizes initial minified gzipped)) =
+render root (Results os ram cpus (Deps direct indirect) normal devnull@(FlagResult _ fs) (Sizes initial minified gzipped)) =
   do  putStrLn "\n-- OVERVIEW -----------------------------------------------\n"
       putStrLn $ "OS:  " ++ os
       putStrLn $ "RAM: " ++ show ram ++ "GB"
       putStrLn $ "CPU: " ++ cpus
 
-      putStrLn $ "PROJECT: " ++ show (length fs) ++ " files, " ++ show (sum (map _lines fs)) ++ " lines\n"
+      putStrLn $ "PROJECT: "
+        ++ show (length fs) ++ " files, "
+        ++ show (sum (map _lines fs)) ++ " lines, "
+        ++ show (Map.size direct) ++ " direct deps, "
+        ++ show (Map.size indirect) ++ " indirect deps\n"
 
       putStrLn $ "ASSET SIZE: "
         ++ show initial  ++ " bytes -> "
