@@ -57,7 +57,7 @@ main =
       sizes <- getSizes elm root npm node
 
       let result = Results (show os) ram (Info.showCPUs cpus) deps normal devnull sizes
-      Binary.encodeFile "results.dat" result
+      Binary.encodeFile "summary.dat" result
       render root result
 
 
@@ -381,7 +381,7 @@ render root (Results os ram cpus (Deps direct indirect) normal devnull@(FlagResu
 
       putStrLn "-----------------------------------------------------------"
       putStrLn "Does everything look alright with these numbers?"
-      putStrLn "If so, please share results.dat in the Discourse thread.\n"
+      putStrLn "If so, please share summary.dat in the Discourse thread.\n"
 
 
 renderResults :: FlagResult -> [String] -> IO ()
