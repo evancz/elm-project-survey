@@ -271,8 +271,8 @@ render root (Results os ram cpus normal devnull@(FlagResult _ fs)) =
 
       putStrLn $ "PROJECT: " ++ show (length fs) ++ " files, " ++ show (sum (map _lines fs)) ++ " lines\n"
 
-      renderResults normal ["elm",root]
-      renderResults devnull ["elm",root,"--output=/dev/null"]
+      renderResults normal ["elm","make",root]
+      renderResults devnull ["elm","make",root,"--output=/dev/null"]
 
       putStrLn "-----------------------------------------------------------"
       putStrLn "Does everything look alright with these numbers?"
