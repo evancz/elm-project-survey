@@ -1,1 +1,2 @@
 split-objs: True
+constraints: Win32 >= 2.8
