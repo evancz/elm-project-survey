@@ -274,7 +274,7 @@ getRoot =
 
 getRam :: IO Word16
 getRam =
-  do  IO.hPutStr IO.stdout "Before we start, how many GB or RAM do you have? "
+  do  IO.hPutStr IO.stdout "Before we start, how many GB of RAM do you have? "
       IO.hFlush IO.stdout
       n <- IO.readLn
       putStrLn ""
