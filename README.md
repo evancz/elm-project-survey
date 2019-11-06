@@ -9,7 +9,7 @@ Step one is to gather data, which is what this code is for.
 
 ## Generated Data
 
-This code generates a local file called `summary.dat` which contains info on:
+This code generates a local file called `build.log` which contains info on:
 
 - OS
 - RAM
@@ -21,4 +21,4 @@ This code generates a local file called `summary.dat` which contains info on:
 
 It does not save any names though. No file names. No directory names. Etc.
 
-The `summary.dat` file is just written to disk, so no one has access to this data unless you send it to them yourself.
+The `build.log` file is just written to disk, so no one has access to this data unless you send it to them yourself.

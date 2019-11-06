@@ -45,7 +45,7 @@ main =
       (info,sizes) <- runJS elm root node
 
       let results = Results info deps normal devnull sizes
-      Binary.encodeFile "summary.dat" results
+      Binary.encodeFile "build.log" results
       render root results
 
 
@@ -388,17 +388,17 @@ instance Json.FromJSON Sizes where
 render :: FilePath -> Results -> IO ()
 render root (Results info deps normal devnull@(FlagResult _ fs) sizes) =
   do  putStrLn "\n-- OVERVIEW -----------------------------------------------\n"
-      putStrLn $ "OS:  " ++ _distro info ++ " " ++ _release info
-      putStrLn $ "RAM: " ++ show (round (fromInteger (_memory info) / 1073741824 :: Double) :: Integer) ++ "GB"
-      putStrLn $ "CPU: " ++ _manufacturer info ++ " " ++ _brand info ++ " @ " ++ _speed info ++ "GHz, " ++ show (_physicalCores info) ++ " physical cores"
+      putStrLn $ "    OS:  " ++ _distro info ++ " " ++ _release info
+      putStrLn $ "    RAM: " ++ show (round (fromInteger (_memory info) / 1073741824 :: Double) :: Integer) ++ "GB"
+      putStrLn $ "    CPU: " ++ _manufacturer info ++ " " ++ _brand info ++ " @ " ++ _speed info ++ "GHz, " ++ show (_physicalCores info) ++ " physical cores"
 
-      putStrLn $ "PROJECT: "
+      putStrLn $ "    PROJECT: "
         ++ show (length fs) ++ " files, "
         ++ show (sum (map _lines fs)) ++ " lines, "
         ++ show (Map.size (_direct deps)) ++ " direct deps, "
         ++ show (Map.size (_indirect deps)) ++ " indirect deps"
 
-      putStrLn $ "ASSET SIZE: "
+      putStrLn $ "    ASSET SIZE: "
         ++ show (_initial  sizes) ++ " bytes -> "
         ++ show (_minified sizes) ++ " bytes (minified) -> "
         ++ show (_gzipped  sizes) ++ " bytes (gzipped)\n"
@@ -408,7 +408,16 @@ render root (Results info deps normal devnull@(FlagResult _ fs) sizes) =
 
       putStrLn "-----------------------------------------------------------"
       putStrLn "Does everything look alright with these numbers?"
-      putStrLn "If so, please share summary.dat in the Discourse thread.\n"
+      putStrLn ""
+      putStrLn "If so, please do the following steps:"
+      putStrLn ""
+      putStrLn "  1. Go to https://github.com/evancz/elm-project-survey/issues/new"
+      putStrLn "  2. Use a title like \"Build times - Windows - 50622 lines\""
+      putStrLn "  3. Copy the OVERVIEW information into the body of the issue."
+      putStrLn "  4. MOST IMPORTANT! Attach the generated build.log file to the issue."
+      putStrLn ""
+      putStrLn "We can figure out what the data means from there!"
+
 
 
 renderResults :: FlagResult -> [String] -> IO ()
@@ -421,7 +430,7 @@ renderResults (FlagResult scratch incrementals) parts =
     maxIn = show (last times)
     n     = maximum (map length [fresh, minIn, medIn, maxIn])
   in
-  do  putStrLn $ "COMMAND: " ++ unwords parts ++ "\n"
+  do  putStrLn $ "    COMMAND: " ++ unwords parts ++ "\n"
       putStrLn $ pad n fresh ++ "ms  -- from scratch"
       putStrLn $ pad n maxIn ++ "ms  -- worst incremental"
       putStrLn $ pad n medIn ++ "ms  -- median incremental"
@@ -430,7 +439,7 @@ renderResults (FlagResult scratch incrementals) parts =
 
 pad :: Int -> String -> String
 pad width str =
-  replicate (2 + width - length str) ' ' ++ str
+  replicate (6 + width - length str) ' ' ++ str
 
 
 median :: [Integer] -> Integer
