@@ -32,5 +32,4 @@ Executable build-timer
         filepath,
         process,
         time >= 1.9.1,
-        raw-strings-qq == 1.1,
-        system-info
+        raw-strings-qq == 1.1

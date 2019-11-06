@@ -8,13 +8,13 @@ import qualified Data.Aeson as Json
 import Data.Binary (get, put)
 import qualified Data.Binary as Binary
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Char as Char
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Time.Clock as Time
 import qualified Data.Time.Clock.System as Time
-import Data.Word (Word16)
 import qualified Details
 import Control.Applicative ((<|>))
 import qualified Control.Exception as E
@@ -23,7 +23,6 @@ import qualified System.Directory as Dir
 import qualified System.Environment as Env
 import qualified System.Exit as Exit
 import System.FilePath ((</>))
-import qualified System.Information as Info
 import qualified System.IO as IO
 import qualified System.Process as Process
 import Text.RawString.QQ (r)
@@ -36,29 +35,18 @@ import Text.RawString.QQ (r)
 main :: IO ()
 main =
   do  deps <- verifyElmJson
-      elm <- getElm
+      elm  <- getElm
+      node <- getNode
       root <- getRoot
 
-      npm <- getNpm
-      node <- getNode
-
-      putStrLn "I am going to run a bunch of `elm` commands."
-      putStrLn "I need `elm` to print to stdout to get realistic measurements."
-      putStrLn "I will print out a nice summary after I am done!\n"
-
-      os <- Info.os
-      ram <- getRam
-      cpus <- Info.cpus
-
-      warmup elm root
       warmup elm root
       normal <- measure elm root []
       devnull <- measure elm root ["--output=/dev/null"]
-      sizes <- getSizes elm root npm node
+      (info,sizes) <- runJS elm root node
 
-      let result = Results (show os) ram (Info.showCPUs cpus) deps normal devnull sizes
-      Binary.encodeFile "summary.dat" result
-      render root result
+      let results = Results info deps normal devnull sizes
+      Binary.encodeFile "summary.dat" results
+      render root results
 
 
 warmup :: Elm -> FilePath -> IO ()
@@ -107,13 +95,25 @@ removeElmStuff =
 
 data Results =
   Results
-    { _os :: String
-    , _ram :: Word16
-    , _cpus :: String
+    { _info :: SystemInfo
     , _deps :: Deps
     , _normal :: FlagResult
     , _devnull :: FlagResult
     , _sizes :: Sizes
+    }
+
+
+data SystemInfo =
+  SystemInfo
+    { _platform :: String
+    , _distro :: String
+    , _release :: String
+    , _memory :: Integer
+    , _manufacturer :: String
+    , _brand :: String
+    , _speed :: String
+    , _logicalCores :: Int
+    , _physicalCores :: Int
     }
 
 
@@ -148,8 +148,13 @@ data Sizes =
 
 
 instance Binary.Binary Results where
-  get = Results <$> get <*> get <*> get <*> get <*> get <*> get <*> get
-  put (Results a b c d e f g) = put a >> put b >> put c >> put d >> put e >> put f >> put g
+  get = M.liftM5 Results get get get get get
+  put (Results a b c d e) = put a >> put b >> put c >> put d >> put e
+
+
+instance Binary.Binary SystemInfo where
+  get = SystemInfo <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
+  put (SystemInfo a b c d e f g h i) = put a >> put b >> put c >> put d >> put e >> put f >> put g >> put h >> put i
 
 
 instance Binary.Binary Deps where
@@ -294,26 +299,7 @@ getRoot =
 
 
 
--- GET RAM
-
-
-getRam :: IO Word16
-getRam =
-  do  IO.hPutStr IO.stdout "Before we start, how many GB of RAM do you have? "
-      IO.hFlush IO.stdout
-      n <- IO.readLn
-      putStrLn ""
-      return n
-
-
-
--- GET NPM
-
-
-getNpm :: IO FilePath
-getNpm =
-  do  maybeNpm <- Dir.findExecutable "npm"
-      check maybeNpm "Could not find `npm` on your PATH.\nI need it to measure minification sizes."
+-- GET NODE
 
 
 getNode :: IO FilePath
@@ -324,11 +310,11 @@ getNode =
 
 
 
--- GET SIZES
+-- RUN JS
 
 
-getSizes :: Elm -> FilePath -> FilePath -> FilePath -> IO Sizes
-getSizes elm root npm node =
+runJS :: Elm -> FilePath -> FilePath -> IO (SystemInfo, Sizes)
+runJS elm root node =
   do  let dir = "elm-stuff" </> "0.19.1" </> "temporary"
       let path = dir </> "elm.js"
 
@@ -340,10 +326,15 @@ getSizes elm root npm node =
         do  BS.writeFile "index.js" indexJS
             BS.writeFile "package.json" packageJSON
             BS.writeFile "package-lock.json" packageLockJSON
-            _ <- Process.readProcess npm ["install"] ""
-            o <- Process.readProcess node ["index.js"] ""
-            let [inital,minified,gzipped] = read o
-            return (Sizes inital minified gzipped)
+            _code <- Process.system "npm install"
+            json <- Process.readProcess node ["index.js"] ""
+            putStrLn json
+            case Json.eitherDecode' (B.toLazyByteString (B.stringUtf8 json)) of
+              Left message ->
+                failure $ "Something went wrong when trying to collect system data and asset sizes:\n\n" ++ message
+
+              Right (JSOutput info sizes) ->
+                return (info, sizes)
 
 
 withinTempDir :: FilePath -> IO a -> IO a
@@ -354,27 +345,63 @@ withinTempDir dir work =
     (\_ -> Dir.withCurrentDirectory dir work)
 
 
+data JSOutput =
+  JSOutput SystemInfo Sizes
+
+
+instance Json.FromJSON JSOutput where
+  parseJSON =
+    Json.withObject "output" $ \obj ->
+      JSOutput
+        <$> obj .: "info"
+        <*> obj .: "sizes"
+
+
+instance Json.FromJSON SystemInfo where
+  parseJSON =
+    Json.withObject "output" $ \obj ->
+      SystemInfo
+        <$> obj .: "platform"
+        <*> obj .: "distro"
+        <*> obj .: "release"
+        <*> obj .: "memory"
+        <*> obj .: "manufacturer"
+        <*> obj .: "brand"
+        <*> obj .: "speed"
+        <*> obj .: "logicalCores"
+        <*> obj .: "physicalCores"
+
+
+instance Json.FromJSON Sizes where
+  parseJSON =
+    Json.withObject "sizes" $ \obj ->
+      Sizes
+        <$> obj .: "initial"
+        <*> obj .: "minified"
+        <*> obj .: "gzipped"
+
+
 
 -- RENDER
 
 
 render :: FilePath -> Results -> IO ()
-render root (Results os ram cpus (Deps direct indirect) normal devnull@(FlagResult _ fs) (Sizes initial minified gzipped)) =
+render root (Results info deps normal devnull@(FlagResult _ fs) sizes) =
   do  putStrLn "\n-- OVERVIEW -----------------------------------------------\n"
-      putStrLn $ "OS:  " ++ os
-      putStrLn $ "RAM: " ++ show ram ++ "GB"
-      putStrLn $ "CPU: " ++ cpus
+      putStrLn $ "OS:  " ++ _distro info ++ " " ++ _release info
+      putStrLn $ "RAM: " ++ show (_memory info `div` 1073741824) ++ "GB"
+      putStrLn $ "CPU: " ++ _manufacturer info ++ " " ++ _brand info ++ " @ " ++ _speed info ++ "GHz, " ++ show (_physicalCores info) ++ " physical cores"
 
       putStrLn $ "PROJECT: "
         ++ show (length fs) ++ " files, "
         ++ show (sum (map _lines fs)) ++ " lines, "
-        ++ show (Map.size direct) ++ " direct deps, "
-        ++ show (Map.size indirect) ++ " indirect deps\n"
+        ++ show (Map.size (_direct deps)) ++ " direct deps, "
+        ++ show (Map.size (_indirect deps)) ++ " indirect deps"
 
       putStrLn $ "ASSET SIZE: "
-        ++ show initial  ++ " bytes -> "
-        ++ show minified ++ " bytes (minified) -> "
-        ++ show gzipped  ++ " bytes (gzipped)\n"
+        ++ show (_initial  sizes) ++ " bytes -> "
+        ++ show (_minified sizes) ++ " bytes (minified) -> "
+        ++ show (_gzipped  sizes) ++ " bytes (gzipped)\n"
 
       renderResults normal ["elm","make",root]
       renderResults devnull ["elm","make",root,"--output=/dev/null"]
@@ -440,6 +467,7 @@ indexJS :: BS.ByteString
 indexJS = [r|
 
 var fs = require('fs');
+var si = require('systeminformation');
 var UglifyJS = require("uglify-js");
 var zlib = require('zlib');
 
@@ -465,11 +493,30 @@ var phase2 = UglifyJS.minify(phase1.code, {
 
 // OUTPUT
 
-var initialSize = fs.statSync("elm.js").size;
-var minifiedSize = Buffer.from(phase2.code, 'utf8').length;
-var gzippedSize = zlib.gzipSync(phase2.code).length;
-
-console.log([initialSize, minifiedSize, gzippedSize]);
+si.osInfo(function(info) {
+  si.mem(function(memory) {
+    si.cpu(function(cpu) {
+      console.log(JSON.stringify({
+        sizes: {
+          initial: fs.statSync("elm.js").size,
+          minified: Buffer.from(phase2.code, 'utf8').length,
+          gzipped: zlib.gzipSync(phase2.code).length
+        },
+        info: {
+          platform: info.platform,
+          distro: info.distro,
+          release: info. release,
+          memory: memory.total,
+          manufacturer: cpu.manufacturer,
+          brand: cpu.brand,
+          speed: cpu.speed,
+          logicalCores: cpu.cores,
+          physicalCores: cpu.physicalCores
+        }
+      }));
+    });
+  });
+});
 
 |]
 
@@ -484,7 +531,8 @@ packageJSON = [r|
   "main": "index.js",
   "license": "BSD-3-Clause",
   "dependencies": {
-    "uglify-js": "3.6.7"
+    "uglify-js": "3.6.7",
+    "systeminformation": "4.14.17"
   }
 }
 |]
@@ -507,6 +555,11 @@ packageLockJSON = [r|
       "version": "0.6.1",
       "resolved": "https://registry.npmjs.org/source-map/-/source-map-0.6.1.tgz",
       "integrity": "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="
+    },
+    "systeminformation": {
+      "version": "4.14.17",
+      "resolved": "https://registry.npmjs.org/systeminformation/-/systeminformation-4.14.17.tgz",
+      "integrity": "sha512-CQbT5vnkqNb3JNl41xr8sYA8AX7GoaWP55/jnmFNQY0XQmUuoFshSNUkCkxiDdEC1qu2Vg9s0jR6LLmVSmNJUw=="
     },
     "uglify-js": {
       "version": "3.6.7",
