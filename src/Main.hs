@@ -389,7 +389,7 @@ render :: FilePath -> Results -> IO ()
 render root (Results info deps normal devnull@(FlagResult _ fs) sizes) =
   do  putStrLn "\n-- OVERVIEW -----------------------------------------------\n"
       putStrLn $ "OS:  " ++ _distro info ++ " " ++ _release info
-      putStrLn $ "RAM: " ++ show (_memory info `div` 1073741824) ++ "GB"
+      putStrLn $ "RAM: " ++ show (round (fromInteger (_memory info) / 1073741824 :: Double) :: Integer) ++ "GB"
       putStrLn $ "CPU: " ++ _manufacturer info ++ " " ++ _brand info ++ " @ " ++ _speed info ++ "GHz, " ++ show (_physicalCores info) ++ " physical cores"
 
       putStrLn $ "PROJECT: "
