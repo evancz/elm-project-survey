@@ -34,43 +34,43 @@ import Text.RawString.QQ (r)
 
 main :: IO ()
 main =
-  do  deps <- verifyElmJson
-      elm  <- getElm
-      node <- getNode
-      root <- getRoot
+  do  deps  <- verifyElmJson
+      elm   <- getElm
+      node  <- getNode
+      roots <- getRoots
 
-      warmup elm root
-      normal <- measure elm root []
-      devnull <- measure elm root ["--output=/dev/null"]
-      (info,sizes) <- runJS elm root node
+      warmup elm roots
+      normal <- measure elm roots []
+      devnull <- measure elm roots ["--output=/dev/null"]
+      (info,sizes) <- runJS elm roots node
 
       let results = Results info deps normal devnull sizes
       Binary.encodeFile "build.log" results
-      render root results
+      render roots results
 
 
-warmup :: Elm -> FilePath -> IO ()
-warmup elm root =
+warmup :: Elm -> [FilePath] -> IO ()
+warmup elm roots =
   do  removeElmStuff
-      _ <- _run elm ["make", root, "--output=/dev/null"]
+      _ <- _run elm ("make" : roots ++ ["--output=/dev/null"])
       return ()
 
 
-measure :: Elm -> FilePath -> [String] -> IO FlagResult
-measure elm root flags =
+measure :: Elm -> [FilePath] -> [String] -> IO FlagResult
+measure elm roots flags =
   do  removeElmStuff
-      scratch <- _run elm ("make" : root : flags)
+      scratch <- _run elm ("make" : roots ++ flags)
       paths <- Details.getLocalPaths
-      incrementals <- traverse (measureFile elm root flags) paths
+      incrementals <- traverse (measureFile elm roots flags) paths
       return $ FlagResult scratch incrementals
 
 
-measureFile :: Elm -> FilePath -> [String] -> FilePath -> IO FileResult
-measureFile elm root flags path =
+measureFile :: Elm -> [FilePath] -> [String] -> FilePath -> IO FileResult
+measureFile elm roots flags path =
   do  bytes <- fromIntegral <$> Dir.getFileSize path
       lines <- (+) 1 . BS.count 0x0A <$> BS.readFile path
       touch path
-      time <- _run elm ("make" : root : flags)
+      time <- _run elm ("make" : roots ++ flags)
       return (FileResult bytes lines time)
 
 
@@ -281,21 +281,46 @@ trim str =
 
 
 
--- GET ROOT
+-- GET ROOTS
 
 
-getRoot :: IO FilePath
-getRoot =
+getRoots :: IO [FilePath]
+getRoots =
   do  args <- Env.getArgs
       case args of
-        [path] ->
-          do  exists <- Dir.doesFileExist path
-              if exists
-                then return path
-                else failure $ "I cannot find a file named " ++ path
+        [] ->
+          failure
+            "When you call `elm make` during development, what files do you give it?\n\
+            \If you call `elm make` with a single entry point, tell me which one:\n\
+            \\n\
+            \     # elm make src/Main.elm --debug\n\
+            \    ./measure-elm-make src/Main.elm\n\
+            \\n\
+            \If you run `elm make` with multiple entry points during development, you\n\
+            \can tell me that as well:\n\
+            \\n\
+            \     # elm make src/Home.elm src/Settings.elm --output=elm.js\n\
+            \    ./measure-elm-make src/Home.elm src/Settings.elm\n\
+            \\n\
+            \DO NOT TRY TO MAXIMIZE PROJECT SIZE BY GIVING EXTRA FILES. The goal is to\n\
+            \measure day-to-day compile times. Not what happens on CI or what could happen\n\
+            \if your development setup was different. ONLY GIVE THE FILES YOU NORMALLY GIVE."
 
         _ ->
-          failure "Expecting the root of your application as an argument. For example:\n\n    ./benchmark src/Main.elm\n\nBut with whatever file is the main entrypoint for your application."
+          do  mapM_ checkRoot args
+              return args
+
+
+checkRoot :: FilePath -> IO ()
+checkRoot path =
+  do  exists <- Dir.doesFileExist path
+      if exists
+        then return ()
+        else
+          do  prog <- Env.getProgName
+              failure $
+                "All the arguments to " ++ prog ++ " must be Elm paths.\n\
+                \I cannot find a file named " ++ path ++ " though."
 
 
 
@@ -313,12 +338,12 @@ getNode =
 -- RUN JS
 
 
-runJS :: Elm -> FilePath -> FilePath -> IO (SystemInfo, Sizes)
-runJS elm root node =
+runJS :: Elm -> [FilePath] -> FilePath -> IO (SystemInfo, Sizes)
+runJS elm roots node =
   do  let dir = "elm-stuff" </> "0.19.1" </> "temporary"
       let path = dir </> "elm.js"
 
-      _ <- _run elm ["make", root, "--output=" ++ path, "--optimize"]
+      _ <- _run elm ("make" : roots ++ ["--output=" ++ path, "--optimize"])
 
       putStrLn "Working on estimating asset sizes."
 
@@ -385,8 +410,8 @@ instance Json.FromJSON Sizes where
 -- RENDER
 
 
-render :: FilePath -> Results -> IO ()
-render root (Results info deps normal devnull@(FlagResult _ fs) sizes) =
+render :: [FilePath] -> Results -> IO ()
+render roots (Results info deps normal devnull@(FlagResult _ fs) sizes) =
   do  putStrLn "\n-- OVERVIEW -----------------------------------------------\n"
       putStrLn $ "    OS:  " ++ _distro info ++ " " ++ _release info
       putStrLn $ "    RAM: " ++ show (round (fromInteger (_memory info) / 1073741824 :: Double) :: Integer) ++ "GB"
@@ -403,8 +428,8 @@ render root (Results info deps normal devnull@(FlagResult _ fs) sizes) =
         ++ show (_minified sizes) ++ " bytes (minified) -> "
         ++ show (_gzipped  sizes) ++ " bytes (gzipped)\n"
 
-      renderResults normal ["elm","make",root]
-      renderResults devnull ["elm","make",root,"--output=/dev/null"]
+      renderResults normal ("elm" : "make" : roots)
+      renderResults devnull ("elm" : "make" : roots ++ ["--output=/dev/null"])
 
       putStrLn "-----------------------------------------------------------"
       putStrLn "Does everything look alright with these numbers?"
