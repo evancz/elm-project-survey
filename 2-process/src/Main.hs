@@ -22,16 +22,13 @@ import System.FilePath ((</>))
 --
 -- The names should be like 4.evancz.log to capture the issue number and OP.
 --
--- This code will generate a json/ directory with individual results and a
--- composite file called results.json that has all the data in one place.
---
--- The goal is to get this into a format that will be easier to use in Elm.
+-- This code generates a file called results.json that has all the data in
+-- one place in a format that will be easier to use in Elm.
 
 
 main :: IO ()
 main =
   do  logs <- Dir.listDirectory "logs"
-      Dir.createDirectoryIfMissing True "json"
       json <- mapM convertLog logs
       LBS.writeFile "results.json" (Json.encode json)
 
@@ -39,9 +36,7 @@ main =
 convertLog :: String -> IO Json.Value
 convertLog name =
   do  results <- Binary.decodeFile ("logs" </> name)
-      let json = encode name results
-      LBS.writeFile ("json" </> name) (Json.encode json)
-      return json
+      return (encode name results)
 
 
 
