@@ -1,0 +1,29 @@
+Name: process
+Version: 1.0.0
+
+Synopsis:     Process data on build times for Elm projects on various platforms.
+Homepage:     https://elm-lang.org
+License:      BSD3
+License-file: LICENSE
+Author:       Evan Czaplicki
+Maintainer:   info@elm-lang.org
+Copyright:    Copyright (c) 2019, Evan Czaplicki
+
+Category: Compiler, Language
+
+Cabal-version: >=1.9
+Build-type: Simple
+
+Executable process
+    ghc-options: -Wall -Werror -O2
+    Hs-Source-Dirs: src
+    Main-Is: Main.hs
+
+    Build-depends:
+        aeson,
+        base >=4.11 && <5,
+        binary >= 0.8 && < 0.9,
+        bytestring >= 0.9 && < 0.11,
+        containers >= 0.5.8.2 && < 0.6,
+        directory >= 1.2.3.0 && < 2.0,
+        filepath
